@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f1117;
+    color: #e0e0e0;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+
+  .container { max-width: 960px; margin: 0 auto; }
+
+  h1 { font-size: 1.8rem; font-weight: 600; color: #fff; margin-bottom: 32px; }
+  h2 { font-size: 1.3rem; font-weight: 600; color: #fff; margin-bottom: 16px; }
+  h3 { font-size: 1rem; font-weight: 600; color: #a0a8c0; margin-bottom: 10px; }
+
+  .card {
+    background: #1a1d27;
+    border: 1px solid #2a2d3a;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block; font-size: 0.8rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: #8890a8; margin-bottom: 6px;
+  }
+
+  input[type="number"] {
+    width: 100%; padding: 10px 14px; background: #12141c;
+    border: 1px solid #2a2d3a; border-radius: 8px;
+    color: #e0e0e0; font-size: 1rem; outline: none;
+  }
+  input[type="number"]:focus { border-color: #5b7fff; }
+
+  .toggle-group {
+    display: flex; border-radius: 8px; overflow: hidden;
+    border: 1px solid #2a2d3a;
+  }
+  .toggle-group label {
+    flex: 1; text-align: center; padding: 10px 14px;
+    font-size: 0.9rem; font-weight: 500; cursor: pointer;
+    background: #12141c; color: #8890a8; text-transform: none;
+    letter-spacing: normal; margin-bottom: 0; user-select: none;
+    transition: background 0.2s, color 0.2s;
+  }
+  .toggle-group input { display: none; }
+  .toggle-group input:checked + label { background: #5b7fff; color: #fff; }
+  .toggle-group label:not(:last-child) { border-right: 1px solid #2a2d3a; }
+
+  .btn {
+    padding: 10px 20px; border: none; border-radius: 8px;
+    font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-primary { background: #5b7fff; color: #fff; }
+  .btn-primary:hover { background: #4a6be0; }
+  .btn-sm { padding: 6px 14px; font-size: 0.8rem; }
+  .btn-danger { background: #dc2626; color: #fff; }
+  .btn-danger:hover { background: #b91c1c; }
+  .btn-secondary { background: #2a2d3a; color: #c0c8e0; }
+  .btn-secondary:hover { background: #353848; }
+
+  .exp-header {
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; user-select: none;
+  }
+  .exp-header:hover .exp-title { color: #5b7fff; }
+  .exp-title { transition: color 0.15s; }
+  .exp-meta { font-size: 0.85rem; color: #8890a8; margin-top: 4px; }
+  .exp-body { display: none; margin-top: 20px; border-top: 1px solid #2a2d3a; padding-top: 20px; }
+  .exp-body.open { display: block; }
+
+  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-radius: 8px; overflow: hidden; border: 1px solid #2a2d3a; }
+  .tab {
+    flex: 1; text-align: center; padding: 8px 16px; font-size: 0.85rem;
+    font-weight: 600; cursor: pointer; background: #12141c; color: #8890a8;
+    border: none; transition: background 0.15s, color 0.15s;
+  }
+  .tab:not(:last-child) { border-right: 1px solid #2a2d3a; }
+  .tab.active { background: #5b7fff; color: #fff; }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .token-group { margin-bottom: 16px; }
+  .token-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 0; font-size: 0.9rem;
+  }
+  .token-type {
+    width: 110px; font-size: 0.75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #8890a8;
+  }
+  .token-value {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 1rem; color: #e0e0e0; background: #12141c;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid #2a2d3a; transition: border-color 0.15s;
+  }
+  .token-value:hover { border-color: #5b7fff; }
+  .token-status { font-size: 0.8rem; }
+  .token-status.used { color: #f87171; }
+  .token-status.available { color: #34d399; }
+
+  table {
+    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+  }
+  th {
+    text-align: left; padding: 8px 10px; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: #8890a8; border-bottom: 2px solid #2a2d3a;
+  }
+  td {
+    padding: 8px 10px; border-bottom: 1px solid #1e2130;
+    color: #c0c8e0; vertical-align: top;
+  }
+  tr:hover td { background: #1e2130; }
+  .correct { color: #34d399; }
+  .incorrect { color: #f87171; }
+
+  .empty { text-align: center; padding: 32px; color: #555; font-style: italic; }
+
+  .actions-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .copied-toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #34d399; color: #0f1117; padding: 8px 20px; border-radius: 8px;
+    font-size: 0.9rem; font-weight: 600; opacity: 0; transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .copied-toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Admin Panel</h1>
+
+  <!-- Create Experiment -->
+  <div class="card">
+    <h2>Create Experiment</h2>
+    <div class="field">
+      <label>Experiment Name</label>
+      <input type="text" id="inp-name" placeholder="e.g. Pilot Study 1" maxlength="120" style="width:100%;padding:10px 14px;background:#12141c;border:1px solid #2a2d3a;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none;">
+    </div>
+    <div class="field">
+      <label>Object Type</label>
+      <div class="toggle-group">
+        <input type="radio" name="objectType" id="obj-radials" value="radials" checked>
+        <label for="obj-radials">Radials</label>
+        <input type="radio" name="objectType" id="obj-chains" value="chains">
+        <label for="obj-chains">Chains</label>
+      </div>
+    </div>
+    <div class="field">
+      <label>Samples per Question</label>
+      <input type="number" id="inp-samples" min="2" max="25" value="4">
+    </div>
+    <div class="field">
+      <label>Number of Questions</label>
+      <input type="number" id="inp-questions" min="1" max="100" value="10">
+    </div>
+    <div class="field">
+      <label>Number of Participants</label>
+      <input type="number" id="inp-participants" min="1" max="200" value="5">
+    </div>
+    <button class="btn btn-primary" id="btn-create">Create Experiment</button>
+  </div>
+
+  <!-- Experiments List -->
+  <h2>Experiments</h2>
+  <div id="experiments-list"></div>
+</div>
+
+<div class="copied-toast" id="toast">Copied!</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function showToast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1200);
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: r.statusText }));
+    throw new Error(e.error || r.statusText);
+  }
+  if (r.headers.get('Content-Type')?.includes('json')) return r.json();
+  return r.text();
+}
+
+// ---- Create Experiment ----
+
+$('btn-create').addEventListener('click', async () => {
+  const name = $('inp-name').value.trim();
+  const object_type = document.querySelector('input[name="objectType"]:checked').value;
+  const samples_per_question = parseInt($('inp-samples').value);
+  const num_questions = parseInt($('inp-questions').value);
+  const num_participants = parseInt($('inp-participants').value);
+
+  try {
+    $('btn-create').disabled = true;
+    $('btn-create').textContent = 'Creating...';
+    await api('POST', '/api/experiments', { name, object_type, samples_per_question, num_questions, num_participants });
+    loadExperiments();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    $('btn-create').disabled = false;
+    $('btn-create').textContent = 'Create Experiment';
+  }
+});
+
+// ---- Load Experiments ----
+
+async function loadExperiments() {
+  const exps = await api('GET', '/api/experiments');
+  const list = $('experiments-list');
+
+  if (!exps.length) {
+    list.innerHTML = '<div class="card"><div class="empty">No experiments yet</div></div>';
+    return;
+  }
+
+  list.innerHTML = exps.map(e => `
+    <div class="card" id="exp-${e.id}">
+      <div class="exp-header" onclick="toggleExp(${e.id})">
+        <div>
+          <div class="exp-title"><strong>${escapeHtml(e.name || 'Unnamed')}</strong> &mdash; ${escapeHtml(e.object_type)}</div>
+          <div class="exp-meta">
+            ${e.samples_per_question} samples &middot; ${e.num_questions} questions &middot;
+            ${e.num_participants} participants &middot; ${e.completed_sessions} completed &middot;
+            ${escapeHtml(e.created_at)}
+          </div>
+        </div>
+        <span style="color:#555;font-size:1.2rem">&#9660;</span>
+      </div>
+      <div class="exp-body" id="exp-body-${e.id}"></div>
+    </div>
+  `).join('');
+}
+
+async function toggleExp(id) {
+  const body = $(`exp-body-${id}`);
+  if (body.classList.contains('open')) {
+    body.classList.remove('open');
+    return;
+  }
+  body.classList.add('open');
+  if (!body.dataset.loaded) {
+    body.innerHTML = 'Loading...';
+    await loadExpDetail(id);
+    body.dataset.loaded = '1';
+  }
+}
+
+async function loadExpDetail(id) {
+  const [detail, results] = await Promise.all([
+    api('GET', `/api/experiments/${id}`),
+    api('GET', `/api/experiments/${id}/results`)
+  ]);
+
+  const body = $(`exp-body-${id}`);
+  body.innerHTML = `
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(${id},'tokens',this)">Tokens</button>
+      <button class="tab" onclick="switchTab(${id},'results',this)">Results</button>
+    </div>
+    <div class="tab-content active" id="tab-tokens-${id}">
+      ${renderTokens(detail.tokens)}
+    </div>
+    <div class="tab-content" id="tab-results-${id}">
+      ${renderResults(id, results)}
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #2a2d3a;padding-top:16px">
+      <button class="btn btn-danger btn-sm" onclick="deleteExp(${id})">Delete Experiment</button>
+    </div>
+  `;
+}
+
+function switchTab(id, tab, el) {
+  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  el.parentElement.parentElement.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  $(`tab-${tab}-${id}`).classList.add('active');
+}
+
+// ---- Tokens ----
+
+function renderTokens(tokens) {
+  const byParticipant = {};
+  for (const t of tokens) {
+    if (!byParticipant[t.participant_number]) byParticipant[t.participant_number] = [];
+    byParticipant[t.participant_number].push(t);
+  }
+
+  let html = '';
+  for (const [pn, toks] of Object.entries(byParticipant)) {
+    html += `<div class="token-group"><h3>Participant ${pn}</h3>`;
+    for (const t of toks) {
+      const status = t.used
+        ? '<span class="token-status used">Used</span>'
+        : '<span class="token-status available">Available</span>';
+      html += `
+        <div class="token-row">
+          <span class="token-type">${escapeHtml(t.pattern_type)}</span>
+          <span class="token-value" onclick="copyToken(this)" title="Click to copy">${escapeHtml(t.token)}</span>
+          ${status}
+        </div>`;
+    }
+    html += '</div>';
+  }
+  return html;
+}
+
+function copyToken(el) {
+  navigator.clipboard.writeText(el.textContent);
+  showToast('Copied: ' + el.textContent);
+}
+
+// ---- Results ----
+
+function renderResults(id, data) {
+  const { sessions } = data;
+  if (!sessions.length) return '<div class="empty">No results yet</div>';
+
+  const completedSessions = sessions.filter(s => s.responses.length > 0);
+  if (!completedSessions.length) return '<div class="empty">No responses yet</div>';
+
+  let html = `
+    <div class="actions-row">
+      <a href="/api/experiments/${id}/results/csv" class="btn btn-secondary btn-sm" download>Download CSV</a>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <tr>
+        <th>P#</th><th>Pattern</th><th>Q#</th>
+        <th>Between Videos (ms)</th><th>Focus %</th>
+        <th>Choice Time</th><th>Chosen</th><th>Correct</th><th>Result</th>
+      </tr>`;
+
+  for (const s of completedSessions) {
+    for (const r of s.responses) {
+      const vpt = r.video_page_times ? JSON.parse(r.video_page_times).map(v => Math.round(v)).join(', ') : '';
+      const vfp = r.video_focus_percentages ? JSON.parse(r.video_focus_percentages).map(v => v.toFixed(1)).join(', ') : '';
+      const cls = r.is_correct ? 'correct' : 'incorrect';
+      html += `
+        <tr>
+          <td>${s.participant_number}</td>
+          <td>${s.pattern_type}</td>
+          <td>${r.question_index + 1}</td>
+          <td>${vpt}</td>
+          <td>${vfp}</td>
+          <td>${Math.round(r.choice_time_ms)} ms</td>
+          <td>${r.chosen_answer}</td>
+          <td>${r.correct_answer}</td>
+          <td class="${cls}">${r.is_correct ? 'Correct' : 'Wrong'}</td>
+        </tr>`;
+    }
+  }
+
+  html += '</table></div>';
+  return html;
+}
+
+// ---- Delete ----
+
+async function deleteExp(id) {
+  if (!confirm('Delete this experiment and all its data?')) return;
+  await api('DELETE', `/api/experiments/${id}`);
+  loadExperiments();
+}
+
+// ---- Init ----
+loadExperiments();
+</script>
+</body>
+</html>

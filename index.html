@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Classification Test</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f1117;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 40px 20px;
+  }
+
+  #app { width: 100%; max-width: 800px; }
+
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  h1 { text-align: center; font-size: 1.8rem; font-weight: 600; margin-bottom: 32px; color: #fff; }
+  h2 { text-align: center; font-size: 1.3rem; font-weight: 500; margin-bottom: 24px; color: #a0a8c0; }
+
+  .card {
+    max-width: 480px; margin: 0 auto;
+    background: #1a1d27; border: 1px solid #2a2d3a;
+    border-radius: 12px; padding: 32px;
+  }
+
+  .field { margin-bottom: 20px; }
+  .field label {
+    display: block; font-size: 0.85rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: #8890a8; margin-bottom: 8px;
+  }
+  .field input {
+    width: 100%; padding: 12px 16px; background: #12141c;
+    border: 1px solid #2a2d3a; border-radius: 8px;
+    color: #e0e0e0; font-size: 1.2rem; text-align: center;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    letter-spacing: 0.1em; outline: none;
+  }
+  .field input:focus { border-color: #5b7fff; }
+
+  .error-msg {
+    text-align: center; color: #f87171; font-size: 0.9rem;
+    margin-bottom: 12px; min-height: 1.3em;
+  }
+
+  .btn {
+    display: block; width: 100%; padding: 12px; border: none;
+    border-radius: 8px; font-size: 1rem; font-weight: 600;
+    cursor: pointer; transition: background 0.2s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn-primary { background: #5b7fff; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #4a6be0; }
+  .btn-inline { max-width: 300px; margin: 0 auto; }
+
+  .phase-bar {
+    text-align: center; margin-bottom: 20px; font-size: 0.8rem;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: #5b7fff; font-weight: 600;
+  }
+
+  /* Instructions */
+  .instructions {
+    max-width: 560px; margin: 0 auto;
+    background: #1a1d27; border: 1px solid #2a2d3a;
+    border-radius: 12px; padding: 32px;
+    line-height: 1.7; font-size: 1rem; color: #c0c8e0;
+  }
+  .instructions ol { padding-left: 24px; margin: 16px 0; }
+  .instructions li { margin-bottom: 8px; }
+  .instructions .note { color: #f8d471; font-weight: 500; margin-top: 16px; }
+  .instructions .btn { margin-top: 24px; }
+
+  /* Study sequential */
+  .study-center { display: flex; flex-direction: column; align-items: center; }
+  .study-progress { font-size: 0.85rem; color: #8890a8; margin-bottom: 8px; }
+  .study-index {
+    font-size: 2.2rem; font-weight: 800; color: #5b7fff;
+    margin-bottom: 16px; min-height: 1.2em;
+  }
+  .video-slot {
+    width: 100%; max-width: 480px; min-height: 320px;
+    display: flex; justify-content: center; align-items: center;
+  }
+  .video-slot video {
+    width: 100%; border-radius: 10px; border: 1px solid #2a2d3a;
+  }
+  .study-next { margin-top: 24px; }
+
+  /* Test */
+  .test-center { display: flex; flex-direction: column; align-items: center; }
+  .test-image {
+    max-width: 360px; width: 100%; border-radius: 10px;
+    border: 2px solid #2a2d3a; margin-bottom: 28px;
+  }
+  .choices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .choice-btn {
+    width: 64px; height: 64px; border: 2px solid #2a2d3a;
+    border-radius: 10px; background: #1a1d27; color: #c0c8e0;
+    font-size: 1.3rem; font-weight: 700; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, transform 0.1s;
+  }
+  .choice-btn:hover { border-color: #5b7fff; background: #22253a; transform: scale(1.05); }
+  .choice-btn:active { transform: scale(0.97); }
+
+  /* Result per question */
+  .result-card {
+    max-width: 480px; margin: 0 auto;
+    background: #1a1d27; border-radius: 12px; padding: 32px; text-align: center;
+  }
+  .result-card.correct { border: 2px solid #34d399; }
+  .result-card.incorrect { border: 2px solid #f87171; }
+  .result-icon { font-size: 3rem; margin-bottom: 12px; }
+  .result-verdict { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; }
+  .result-verdict.v-correct { color: #34d399; }
+  .result-verdict.v-incorrect { color: #f87171; }
+  .result-detail { font-size: 1rem; color: #8890a8; margin-bottom: 4px; }
+  .result-time { font-size: 1.8rem; font-weight: 700; color: #fff; margin: 14px 0; }
+  .result-card .btn { margin-top: 20px; }
+
+  /* Complete */
+  .complete-card {
+    max-width: 480px; margin: 0 auto;
+    background: #1a1d27; border: 2px solid #5b7fff;
+    border-radius: 12px; padding: 40px; text-align: center;
+  }
+  .complete-card h2 { color: #fff; margin-bottom: 12px; }
+  .complete-card p { color: #8890a8; font-size: 1rem; }
+  .score-line {
+    font-size: 2rem; font-weight: 800; color: #5b7fff; margin: 20px 0;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- TOKEN ENTRY -->
+  <div class="screen active" id="screen-token">
+    <h1>Classification Test</h1>
+    <div class="card">
+      <div class="field">
+        <label>Enter your access token</label>
+        <input type="text" id="inp-token" placeholder="XXXX-XXXX" maxlength="9" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </div>
+      <div class="error-msg" id="token-error"></div>
+      <button class="btn btn-primary" id="btn-token">Enter</button>
+    </div>
+  </div>
+
+  <!-- INSTRUCTIONS -->
+  <div class="screen" id="screen-instructions">
+    <h1>Instructions</h1>
+    <div class="instructions" id="instruction-body"></div>
+  </div>
+
+  <!-- STUDY (sequential) -->
+  <div class="screen" id="screen-study">
+    <div class="phase-bar" id="study-bar"></div>
+    <div class="study-center">
+      <div class="study-progress" id="study-progress"></div>
+      <div class="study-index" id="study-index"></div>
+      <div class="video-slot" id="video-slot"></div>
+      <div class="study-next">
+        <button class="btn btn-primary btn-inline hidden" id="btn-vid-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TEST -->
+  <div class="screen" id="screen-test">
+    <div class="phase-bar" id="test-bar"></div>
+    <div class="test-center">
+      <img id="test-img" class="test-image" src="" alt="Test object">
+      <div class="choices" id="choices"></div>
+    </div>
+  </div>
+
+  <!-- QUESTION RESULT -->
+  <div class="screen" id="screen-result">
+    <div class="phase-bar" id="result-bar"></div>
+    <div class="result-card" id="result-card">
+      <div class="result-icon" id="result-icon"></div>
+      <div class="result-verdict" id="result-verdict"></div>
+      <div class="result-detail" id="result-detail"></div>
+      <div class="result-time" id="result-time"></div>
+      <button class="btn btn-primary btn-inline" id="btn-next-q">Next Question</button>
+    </div>
+  </div>
+
+  <!-- COMPLETE -->
+  <div class="screen" id="screen-complete">
+    <div class="complete-card">
+      <h2>Test Complete</h2>
+      <div class="score-line" id="final-score"></div>
+      <p>Thank you for participating. You may close this page.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const SESSION_TOKEN_STORAGE_KEY = 'participant_token';
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  $(id).classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+async function api(method, path, body, options = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (options.useSessionAuth && session?.session_key) {
+    headers['X-Session-Key'] = session.session_key;
+  }
+
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  const contentType = r.headers.get('content-type') || '';
+  const data = contentType.includes('application/json') ? await r.json() : await r.text();
+  if (!r.ok) {
+    const message = typeof data === 'string' ? data : (data?.error || r.statusText);
+    throw new Error(message);
+  }
+  return data;
+}
+
+function sessionApi(method, path, body) {
+  return api(method, path, body, { useSessionAuth: true });
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function normalizeToken(value) {
+  const compact = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  if (compact.length <= 4) return compact;
+  return `${compact.slice(0, 4)}-${compact.slice(4)}`;
+}
+
+function videoPath(objectType, objIndex, patternType) {
+  const prefix = objectType === 'radials' ? 'radial' : 'chain';
+  return `data/${objectType}/${prefix}_${pad2(objIndex)}/${prefix}_${patternType}.mp4`;
+}
+
+function pngPath(objectType, objIndex) {
+  const prefix = objectType === 'radials' ? 'radial' : 'chain';
+  return `data/${objectType}/${prefix}_${pad2(objIndex)}/${prefix}.png`;
+}
+
+// ============ State ============
+
+let session = null;       // { session_id, session_key, experiment, pattern_type, questions, progress }
+let currentQ = 0;         // current question index
+let currentVid = 0;       // current video within a question's study phase
+let totalCorrect = 0;
+
+// per-question accumulators
+let qBetweenVideoTimes = [];
+let qVideoFocusPcts = [];
+
+// timing
+let gapStartTime = 0;
+let choiceShowTime = 0;
+let instructionShowTime = 0;
+
+// focus tracking
+let focusState = { videoStart: 0, focusedMs: 0, lastFocusStart: 0, isVisible: true, active: false };
+
+function startFocusTrack() {
+  focusState.videoStart = performance.now();
+  focusState.focusedMs = 0;
+  focusState.isVisible = !document.hidden;
+  focusState.lastFocusStart = focusState.isVisible ? focusState.videoStart : 0;
+  focusState.active = true;
+}
+
+function endFocusTrack() {
+  focusState.active = false;
+  const now = performance.now();
+  if (focusState.isVisible && focusState.lastFocusStart) {
+    focusState.focusedMs += now - focusState.lastFocusStart;
+  }
+  const total = now - focusState.videoStart;
+  return total > 0 ? (focusState.focusedMs / total) * 100 : 100;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!focusState.active) return;
+  const now = performance.now();
+  if (document.hidden) {
+    if (focusState.isVisible && focusState.lastFocusStart) {
+      focusState.focusedMs += now - focusState.lastFocusStart;
+    }
+    focusState.isVisible = false;
+  } else {
+    focusState.isVisible = true;
+    focusState.lastFocusStart = now;
+  }
+});
+
+// ============ Token Entry ============
+
+$('inp-token').addEventListener('input', e => {
+  e.target.value = normalizeToken(e.target.value);
+});
+
+$('inp-token').addEventListener('keydown', e => { if (e.key === 'Enter') $('btn-token').click(); });
+
+async function beginSession(rawToken, options = {}) {
+  const token = normalizeToken(rawToken);
+  if (token.length !== 9) {
+    throw new Error('Enter a valid access token');
+  }
+
+  $('inp-token').value = token;
+  $('token-error').textContent = '';
+  $('btn-token').disabled = true;
+  $('btn-token').textContent = 'Validating...';
+
+  try {
+    session = await api('POST', '/api/sessions', { token });
+    sessionStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token);
+    currentQ = session.progress.questions_completed;
+    totalCorrect = session.progress.correct_answers || 0;
+
+    if (options.clearUrlToken) {
+      history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (session.progress.instruction_done && currentQ < session.questions.length) {
+      startQuestion();
+    } else if (currentQ >= session.questions.length) {
+      await finishTest();
+    } else {
+      showInstructions();
+    }
+  } catch (error) {
+    sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+    $('token-error').textContent = error.message;
+    throw error;
+  } finally {
+    $('btn-token').disabled = false;
+    $('btn-token').textContent = 'Enter';
+  }
+}
+
+$('btn-token').addEventListener('click', async () => {
+  const token = $('inp-token').value.trim();
+  if (!token) return;
+
+  try {
+    await beginSession(token);
+  } catch {
+    // The token screen already shows the error.
+  }
+});
+
+function resetToTokenEntry(message) {
+  session = null;
+  sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+  $('token-error').textContent = message;
+  showScreen('screen-token');
+}
+
+// ============ Instructions ============
+
+function showInstructions() {
+  const { experiment, questions } = session;
+  const nQ = questions.length;
+  const nS = experiment.samples_per_question;
+
+  $('instruction-body').innerHTML = `
+    <p>Welcome to the classification test. You will be presented with <strong>${nQ}</strong> questions.</p>
+    <p>For each question:</p>
+    <ol>
+      <li>You will watch <strong>${nS}</strong> short videos one at a time, each labeled with a number.</li>
+      <li>After all videos have played, you will see a still image.</li>
+      <li>Select the number that corresponds to the object in the image.</li>
+    </ol>
+    <p class="note">Please watch each video carefully and stay on this page during the test.</p>
+    <button class="btn btn-primary" id="btn-begin">Begin</button>
+  `;
+
+  instructionShowTime = performance.now();
+  showScreen('screen-instructions');
+
+  $('btn-begin').addEventListener('click', async () => {
+    const elapsed = performance.now() - instructionShowTime;
+    try {
+      await sessionApi('POST', `/api/sessions/${session.session_id}/instruction`, { time_ms: elapsed });
+    } catch (error) {
+      resetToTokenEntry(error.message.includes('session key') ? 'Your session expired. Enter your token again.' : error.message);
+      return;
+    }
+    startQuestion();
+  });
+}
+
+// ============ Study Phase ============
+
+function startQuestion() {
+  if (currentQ >= session.questions.length) {
+    finishTest();
+    return;
+  }
+
+  const q = session.questions[currentQ];
+  const sampled = JSON.parse(q.sampled_indices);
+
+  currentVid = 0;
+  qBetweenVideoTimes = [];
+  qVideoFocusPcts = [];
+
+  $('study-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length} \u2014 Study Phase`;
+  showScreen('screen-study');
+  showVideo(sampled);
+}
+
+function showVideo(sampled) {
+  const slot = $('video-slot');
+  const nextBtn = $('btn-vid-next');
+  const nS = sampled.length;
+
+  $('study-progress').textContent = `Video ${currentVid + 1} of ${nS}`;
+  $('study-index').textContent = currentVid + 1;
+
+  slot.innerHTML = '';
+  nextBtn.classList.add('hidden');
+
+  const video = document.createElement('video');
+  video.src = videoPath(session.experiment.object_type, sampled[currentVid], session.pattern_type);
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  slot.appendChild(video);
+
+  startFocusTrack();
+
+  video.addEventListener('ended', () => {
+    const focusPct = endFocusTrack();
+    qVideoFocusPcts.push(focusPct);
+
+    // blank the screen, start gap timer, show Next
+    slot.innerHTML = '';
+    $('study-index').textContent = '';
+    gapStartTime = performance.now();
+
+    nextBtn.textContent = currentVid < nS - 1 ? 'Next' : 'Proceed to Test';
+    nextBtn.classList.remove('hidden');
+  });
+}
+
+$('btn-vid-next').addEventListener('click', () => {
+  const q = session.questions[currentQ];
+  const sampled = JSON.parse(q.sampled_indices);
+
+  qBetweenVideoTimes.push(performance.now() - gapStartTime);
+
+  currentVid++;
+  if (currentVid < sampled.length) {
+    showVideo(sampled);
+  } else {
+    showTestPhase();
+  }
+});
+
+// ============ Test Phase ============
+
+function showTestPhase() {
+  const q = session.questions[currentQ];
+  const nS = session.experiment.samples_per_question;
+
+  $('test-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length} \u2014 Which index matches this object?`;
+  $('test-img').src = pngPath(session.experiment.object_type, q.test_object_index);
+
+  const container = $('choices');
+  container.innerHTML = '';
+  for (let i = 1; i <= nS; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn';
+    btn.textContent = i;
+    btn.addEventListener('click', () => submitAnswer(i));
+    container.appendChild(btn);
+  }
+
+  choiceShowTime = performance.now();
+  showScreen('screen-test');
+}
+
+async function submitAnswer(chosen) {
+  const choiceTime = performance.now() - choiceShowTime;
+
+  // disable buttons
+  $('choices').querySelectorAll('button').forEach(b => b.disabled = true);
+
+  try {
+    const result = await sessionApi('POST', `/api/sessions/${session.session_id}/responses`, {
+      question_index: currentQ,
+      video_page_times: qBetweenVideoTimes,
+      video_focus_percentages: qVideoFocusPcts,
+      choice_time_ms: choiceTime,
+      chosen_answer: chosen
+    });
+
+    if (result.is_correct) totalCorrect++;
+    showQuestionResult(chosen, result, choiceTime);
+  } catch (error) {
+    if (error.message.includes('session key')) {
+      resetToTokenEntry('Your session expired. Enter your token again.');
+      return;
+    }
+    alert('Error submitting response: ' + error.message);
+    $('choices').querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+// ============ Per-Question Result ============
+
+function showQuestionResult(chosen, result, choiceTime) {
+  const card = $('result-card');
+  card.className = 'result-card ' + (result.is_correct ? 'correct' : 'incorrect');
+
+  $('result-icon').textContent = result.is_correct ? '\u2713' : '\u2717';
+  $('result-verdict').textContent = result.is_correct ? 'Correct' : 'Incorrect';
+  $('result-verdict').className = 'result-verdict ' + (result.is_correct ? 'v-correct' : 'v-incorrect');
+  $('result-detail').textContent = result.is_correct
+    ? `You selected ${chosen}`
+    : `You selected ${chosen} \u2014 correct answer was ${result.correct_answer}`;
+  $('result-time').textContent = (choiceTime / 1000).toFixed(2) + 's';
+
+  $('result-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length}`;
+
+  const isLast = currentQ >= session.questions.length - 1;
+  $('btn-next-q').textContent = isLast ? 'Finish' : 'Next Question';
+
+  showScreen('screen-result');
+}
+
+$('btn-next-q').addEventListener('click', () => {
+  currentQ++;
+  if (currentQ < session.questions.length) {
+    startQuestion();
+  } else {
+    finishTest();
+  }
+});
+
+// ============ Completion ============
+
+async function finishTest() {
+  try {
+    await sessionApi('POST', `/api/sessions/${session.session_id}/complete`);
+  } catch (error) {
+    if (error.message.includes('session key')) {
+      resetToTokenEntry('Your session expired. Enter your token again.');
+      return;
+    }
+    alert('We could not finalize your session. Please check your connection and try again.');
+    return;
+  }
+  sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+  $('final-score').textContent = `${totalCorrect} / ${session.questions.length}`;
+  showScreen('screen-complete');
+}
+
+(async function restoreSession() {
+  const params = new URLSearchParams(window.location.search);
+  const tokenFromUrl = normalizeToken(params.get('token') || '');
+  const storedToken = normalizeToken(sessionStorage.getItem(SESSION_TOKEN_STORAGE_KEY) || '');
+  const token = tokenFromUrl || storedToken;
+
+  if (!token || token.length !== 9) return;
+
+  try {
+    await beginSession(token, { clearUrlToken: Boolean(tokenFromUrl) });
+  } catch {
+    // The token screen already shows the relevant error.
+  }
+}());
+</script>
+</body>
+</html>
