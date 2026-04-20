@@ -242,22 +242,10 @@ function sessionApi(method, path, body) {
   return api(method, path, body, { useSessionAuth: true });
 }
 
-function pad2(n) { return String(n).padStart(2, '0'); }
-
 function normalizeToken(value) {
   const compact = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (compact.length <= 4) return compact;
   return `${compact.slice(0, 4)}-${compact.slice(4)}`;
-}
-
-function videoPath(objectType, objIndex, patternType) {
-  const prefix = objectType === 'radials' ? 'radial' : 'chain';
-  return `data/${objectType}/${prefix}_${pad2(objIndex)}/${prefix}_${patternType}.mp4`;
-}
-
-function pngPath(objectType, objIndex) {
-  const prefix = objectType === 'radials' ? 'radial' : 'chain';
-  return `data/${objectType}/${prefix}_${pad2(objIndex)}/${prefix}.png`;
 }
 
 // ============ State ============
@@ -375,24 +363,42 @@ function resetToTokenEntry(message) {
   showScreen('screen-token');
 }
 
+function isClassIdentificationTask() {
+  return session?.experiment?.task_type === 'classify_class';
+}
+
 // ============ Instructions ============
 
 function showInstructions() {
   const { experiment, questions } = session;
   const nQ = questions.length;
   const nS = experiment.samples_per_question;
+  const instructionsHtml = isClassIdentificationTask()
+    ? `
+      <p>Welcome to the classification test. You will be presented with <strong>${nQ}</strong> questions.</p>
+      <p>For each question:</p>
+      <ol>
+        <li>You will watch <strong>${nS}</strong> short sample videos, one at a time, each labeled with a number.</li>
+        <li>Each sample represents a different class.</li>
+        <li>After both videos have played, you will see a still image from one of those classes.</li>
+        <li>Select the number for the sample whose class matches the image.</li>
+      </ol>
+      <p class="note">The test image will not necessarily be one of the exact samples you just watched. Please stay on this page during the test.</p>
+      <button class="btn btn-primary" id="btn-begin">Begin</button>
+    `
+    : `
+      <p>Welcome to the classification test. You will be presented with <strong>${nQ}</strong> questions.</p>
+      <p>For each question:</p>
+      <ol>
+        <li>You will watch <strong>${nS}</strong> short videos one at a time, each labeled with a number.</li>
+        <li>After all videos have played, you will see a still image.</li>
+        <li>Select the number that corresponds to the object in the image.</li>
+      </ol>
+      <p class="note">Please watch each video carefully and stay on this page during the test.</p>
+      <button class="btn btn-primary" id="btn-begin">Begin</button>
+    `;
 
-  $('instruction-body').innerHTML = `
-    <p>Welcome to the classification test. You will be presented with <strong>${nQ}</strong> questions.</p>
-    <p>For each question:</p>
-    <ol>
-      <li>You will watch <strong>${nS}</strong> short videos one at a time, each labeled with a number.</li>
-      <li>After all videos have played, you will see a still image.</li>
-      <li>Select the number that corresponds to the object in the image.</li>
-    </ol>
-    <p class="note">Please watch each video carefully and stay on this page during the test.</p>
-    <button class="btn btn-primary" id="btn-begin">Begin</button>
-  `;
+  $('instruction-body').innerHTML = instructionsHtml;
 
   instructionShowTime = performance.now();
   showScreen('screen-instructions');
@@ -418,7 +424,7 @@ function startQuestion() {
   }
 
   const q = session.questions[currentQ];
-  const sampled = JSON.parse(q.sampled_indices);
+  const studyItems = q.study_items;
 
   currentVid = 0;
   qBetweenVideoTimes = [];
@@ -426,22 +432,23 @@ function startQuestion() {
 
   $('study-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length} \u2014 Study Phase`;
   showScreen('screen-study');
-  showVideo(sampled);
+  showVideo(studyItems);
 }
 
-function showVideo(sampled) {
+function showVideo(studyItems) {
   const slot = $('video-slot');
   const nextBtn = $('btn-vid-next');
-  const nS = sampled.length;
+  const currentItem = studyItems[currentVid];
+  const nS = studyItems.length;
 
   $('study-progress').textContent = `Video ${currentVid + 1} of ${nS}`;
-  $('study-index').textContent = currentVid + 1;
+  $('study-index').textContent = currentItem.label;
 
   slot.innerHTML = '';
   nextBtn.classList.add('hidden');
 
   const video = document.createElement('video');
-  video.src = videoPath(session.experiment.object_type, sampled[currentVid], session.pattern_type);
+  video.src = currentItem.video_path;
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
@@ -465,13 +472,13 @@ function showVideo(sampled) {
 
 $('btn-vid-next').addEventListener('click', () => {
   const q = session.questions[currentQ];
-  const sampled = JSON.parse(q.sampled_indices);
+  const studyItems = q.study_items;
 
   qBetweenVideoTimes.push(performance.now() - gapStartTime);
 
   currentVid++;
-  if (currentVid < sampled.length) {
-    showVideo(sampled);
+  if (currentVid < studyItems.length) {
+    showVideo(studyItems);
   } else {
     showTestPhase();
   }
@@ -481,10 +488,12 @@ $('btn-vid-next').addEventListener('click', () => {
 
 function showTestPhase() {
   const q = session.questions[currentQ];
-  const nS = session.experiment.samples_per_question;
+  const nS = q.study_items.length;
 
-  $('test-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length} \u2014 Which index matches this object?`;
-  $('test-img').src = pngPath(session.experiment.object_type, q.test_object_index);
+  $('test-bar').textContent = isClassIdentificationTask()
+    ? `Question ${currentQ + 1} of ${session.questions.length} \u2014 Which sample class matches this image?`
+    : `Question ${currentQ + 1} of ${session.questions.length} \u2014 Which index matches this object?`;
+  $('test-img').src = q.test_image_path;
 
   const container = $('choices');
   container.innerHTML = '';

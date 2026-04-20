@@ -33,7 +33,7 @@ async function main() {
 
     const created = await request(baseUrl, 'POST', '/api/experiments', {
       name: 'Smoke Test',
-      object_type: 'radials',
+      task_type: 'classify_class',
       samples_per_question: 2,
       num_questions: 1,
       num_participants: 1,
