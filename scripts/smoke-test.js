@@ -70,6 +70,9 @@ async function main() {
     if (!session.session_key) {
       throw new Error('Session creation did not return a session key');
     }
+    if ('correct_answers' in session.progress) {
+      throw new Error('Session progress exposed participant correctness');
+    }
     const choiceLabels = (session.experiment.choice_options || []).map(option => option.label);
     if (choiceLabels.join('|') !== 'Class 1|Class 2') {
       throw new Error('Session choice labels were not returned as Class 1/Class 2');
@@ -87,7 +90,7 @@ async function main() {
       { 'X-Session-Key': session.session_key }
     );
 
-    await request(
+    const firstParticipantResponse = await request(
       baseUrl,
       'POST',
       `/api/sessions/${session.session_id}/responses`,
@@ -100,6 +103,9 @@ async function main() {
       },
       { 'X-Session-Key': session.session_key }
     );
+    if ('is_correct' in firstParticipantResponse || 'correct_answer' in firstParticipantResponse) {
+      throw new Error('Participant response exposed correctness feedback');
+    }
 
     await request(
       baseUrl,

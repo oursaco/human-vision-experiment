@@ -468,7 +468,7 @@ app.post('/api/sessions', sessionCreationLimiter, (req, res) => {
     .all(tokenRecord.experiment_id)
     .map(question => buildParticipantQuestion(experiment, question, tokenRecord.pattern_type));
   const progress = db.prepare(
-    'SELECT COUNT(*) AS questions_completed, COALESCE(SUM(is_correct), 0) AS correct_answers FROM responses WHERE session_id = ?'
+    'SELECT COUNT(*) AS questions_completed FROM responses WHERE session_id = ?'
   ).get(session.id);
 
   res.json({
@@ -488,7 +488,6 @@ app.post('/api/sessions', sessionCreationLimiter, (req, res) => {
     progress: {
       instruction_done: session.instruction_time_ms != null,
       questions_completed: progress.questions_completed,
-      correct_answers: progress.correct_answers,
     },
   });
 });
@@ -629,7 +628,7 @@ app.post(
       throw error;
     }
 
-    res.json({ is_correct: Boolean(isCorrect), correct_answer: question.correct_position });
+    res.json({ ok: true });
   }
 );
 

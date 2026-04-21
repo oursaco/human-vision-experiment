@@ -126,19 +126,14 @@
   .choice-btn:hover { border-color: #5b7fff; background: #22253a; transform: scale(1.05); }
   .choice-btn:active { transform: scale(0.97); }
 
-  /* Result per question */
+  /* Response recorded */
   .result-card {
     max-width: 480px; margin: 0 auto;
-    background: #1a1d27; border-radius: 12px; padding: 32px; text-align: center;
+    background: #1a1d27; border: 1px solid #2a2d3a;
+    border-radius: 12px; padding: 32px; text-align: center;
   }
-  .result-card.correct { border: 2px solid #34d399; }
-  .result-card.incorrect { border: 2px solid #f87171; }
-  .result-icon { font-size: 3rem; margin-bottom: 12px; }
-  .result-verdict { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; }
-  .result-verdict.v-correct { color: #34d399; }
-  .result-verdict.v-incorrect { color: #f87171; }
+  .result-verdict { font-size: 1.4rem; font-weight: 700; margin-bottom: 8px; color: #fff; }
   .result-detail { font-size: 1rem; color: #8890a8; margin-bottom: 4px; }
-  .result-time { font-size: 1.8rem; font-weight: 700; color: #fff; margin: 14px 0; }
   .result-card .btn { margin-top: 20px; }
 
   /* Complete */
@@ -149,9 +144,6 @@
   }
   .complete-card h2 { color: #fff; margin-bottom: 12px; }
   .complete-card p { color: #8890a8; font-size: 1rem; }
-  .score-line {
-    font-size: 2rem; font-weight: 800; color: #5b7fff; margin: 20px 0;
-  }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -200,14 +192,12 @@
     </div>
   </div>
 
-  <!-- QUESTION RESULT -->
+  <!-- RESPONSE RECORDED -->
   <div class="screen" id="screen-result">
     <div class="phase-bar" id="result-bar"></div>
     <div class="result-card" id="result-card">
-      <div class="result-icon" id="result-icon"></div>
       <div class="result-verdict" id="result-verdict"></div>
       <div class="result-detail" id="result-detail"></div>
-      <div class="result-time" id="result-time"></div>
       <button class="btn btn-primary btn-inline" id="btn-next-q">Next Question</button>
     </div>
   </div>
@@ -216,7 +206,6 @@
   <div class="screen" id="screen-complete">
     <div class="complete-card">
       <h2>Test Complete</h2>
-      <div class="score-line" id="final-score"></div>
       <p>Thank you for participating. You may close this page.</p>
     </div>
   </div>
@@ -266,7 +255,6 @@ function normalizeToken(value) {
 let session = null;       // { session_id, session_key, experiment, pattern_type, questions, progress }
 let currentQ = 0;         // current question index
 let currentVid = 0;       // current video within a question's study phase
-let totalCorrect = 0;
 let currentStudyItems = [];
 let currentStudyFinalLabel = 'Proceed to Test';
 let studyNextAction = 'next_video';
@@ -338,7 +326,6 @@ async function beginSession(rawToken, options = {}) {
     session = await api('POST', '/api/sessions', { token });
     sessionStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token);
     currentQ = session.progress.questions_completed;
-    totalCorrect = session.progress.correct_answers || 0;
 
     if (options.clearUrlToken) {
       history.replaceState({}, document.title, window.location.pathname);
@@ -697,10 +684,8 @@ async function submitAnswer(chosen) {
   $('choices').querySelectorAll('button').forEach(b => b.disabled = true);
 
   try {
-    const result = await sessionApi('POST', `/api/sessions/${session.session_id}/responses`, payload);
-
-    if (result.is_correct) totalCorrect++;
-    showQuestionResult(chosen, result, choiceTime);
+    await sessionApi('POST', `/api/sessions/${session.session_id}/responses`, payload);
+    showResponseRecorded();
   } catch (error) {
     if (error.message.includes('session key')) {
       resetToTokenEntry('Your session expired. Enter your token again.');
@@ -711,19 +696,15 @@ async function submitAnswer(chosen) {
   }
 }
 
-// ============ Per-Question Result ============
+// ============ Response Recorded ============
 
-function showQuestionResult(chosen, result, choiceTime) {
+function showResponseRecorded() {
   const card = $('result-card');
-  card.className = 'result-card ' + (result.is_correct ? 'correct' : 'incorrect');
+  card.className = 'result-card';
 
-  $('result-icon').textContent = result.is_correct ? '\u2713' : '\u2717';
-  $('result-verdict').textContent = result.is_correct ? 'Correct' : 'Incorrect';
-  $('result-verdict').className = 'result-verdict ' + (result.is_correct ? 'v-correct' : 'v-incorrect');
-  $('result-detail').textContent = result.is_correct
-    ? `You selected ${choiceLabel(chosen)}`
-    : `You selected ${choiceLabel(chosen)} \u2014 correct answer was ${choiceLabel(result.correct_answer)}`;
-  $('result-time').textContent = (choiceTime / 1000).toFixed(2) + 's';
+  $('result-verdict').textContent = 'Response recorded';
+  $('result-verdict').className = 'result-verdict';
+  $('result-detail').textContent = 'Continue when ready.';
 
   $('result-bar').textContent = isBlockedClassIdentificationTask()
     ? `Image ${currentQ + 1} of ${session.questions.length}`
@@ -760,7 +741,6 @@ async function finishTest() {
     return;
   }
   sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
-  $('final-score').textContent = `${totalCorrect} / ${session.questions.length}`;
   showScreen('screen-complete');
 }
 
