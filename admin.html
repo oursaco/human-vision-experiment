@@ -164,25 +164,26 @@
     </div>
     <div class="field">
       <label>Task</label>
-      <div class="static-value">Two-sample class identification</div>
-      <div class="field-note">Each question shows one sample from each class, then asks which sample class the image belongs to.</div>
+      <div class="static-value">Blocked class identification</div>
+      <div class="field-note">Participants study Class 1 and Class 2 videos first, then classify unseen still images by class.</div>
     </div>
     <div class="field">
       <label>Classes</label>
-      <div class="static-value">Radials and Chains</div>
+      <div class="static-value">Class 1 and Class 2</div>
     </div>
     <div class="field">
-      <label>Samples per Question</label>
-      <input type="number" id="inp-samples" min="2" max="2" value="2" disabled>
-      <div class="field-note">Fixed at 2 for this experiment design.</div>
+      <label>Videos per Class</label>
+      <input type="number" id="inp-samples" min="1" max="24" value="2">
+      <div class="field-note">Choose how many study videos to sample from each class.</div>
     </div>
     <div class="field">
       <label>Pattern Counterbalancing</label>
       <div class="static-value">Continuous and discontinuous tokens are still generated for each participant.</div>
     </div>
     <div class="field">
-      <label>Number of Questions</label>
-      <input type="number" id="inp-questions" min="1" max="100" value="10">
+      <label>Number of Test Images</label>
+      <input type="number" id="inp-questions" min="1" max="48" value="10">
+      <div class="field-note">These are unseen still images shown after the study videos.</div>
     </div>
     <div class="field">
       <label>Number of Participants</label>
@@ -212,18 +213,55 @@ function escapeHtml(value) {
 
 function describeExperiment(experiment) {
   if (experiment.task_type === 'classify_class') {
-    return 'Radials vs Chains';
+    return experiment.task_variant === 'blocked_classify'
+      ? 'Class 1 vs Class 2 (Blocked)'
+      : 'Class 1 vs Class 2';
   }
   if (experiment.object_type === 'radials_vs_chains') {
-    return 'Radials vs Chains';
+    return 'Class 1 vs Class 2';
   }
   if (experiment.object_type === 'radials') {
-    return 'Radials';
+    return 'Class 1';
   }
   if (experiment.object_type === 'chains') {
-    return 'Chains';
+    return 'Class 2';
   }
   return experiment.object_type || 'Unknown';
+}
+
+function isBlockedClassExperiment(experiment) {
+  return experiment.task_type === 'classify_class' && experiment.task_variant === 'blocked_classify';
+}
+
+function experimentSummary(experiment) {
+  if (isBlockedClassExperiment(experiment)) {
+    return `${experiment.samples_per_question} videos/class &middot; ${experiment.num_questions} test images`;
+  }
+  return `${experiment.samples_per_question} samples &middot; ${experiment.num_questions} questions`;
+}
+
+function answerLabel(experiment, value) {
+  if (!isBlockedClassExperiment(experiment)) {
+    return value ?? '';
+  }
+  if (value === 1) {
+    return 'Class 1';
+  }
+  if (value === 2) {
+    return 'Class 2';
+  }
+  return value ?? '';
+}
+
+function compactMediaPath(value) {
+  return String(value || '').replace(/^data\//, '');
+}
+
+function renderMediaPaths(paths) {
+  if (!Array.isArray(paths) || !paths.length) {
+    return '';
+  }
+  return paths.map(path => escapeHtml(compactMediaPath(path))).join('<br>');
 }
 
 function showToast(msg) {
@@ -249,9 +287,9 @@ async function api(method, path, body) {
 
 $('btn-create').addEventListener('click', async () => {
   const name = $('inp-name').value.trim();
-  const samples_per_question = 2;
-  const num_questions = parseInt($('inp-questions').value);
-  const num_participants = parseInt($('inp-participants').value);
+  const samples_per_question = parseInt($('inp-samples').value, 10);
+  const num_questions = parseInt($('inp-questions').value, 10);
+  const num_participants = parseInt($('inp-participants').value, 10);
 
   try {
     $('btn-create').disabled = true;
@@ -289,7 +327,7 @@ async function loadExperiments() {
         <div>
           <div class="exp-title"><strong>${escapeHtml(e.name || 'Unnamed')}</strong> &mdash; ${escapeHtml(describeExperiment(e))}</div>
           <div class="exp-meta">
-            ${e.samples_per_question} samples &middot; ${e.num_questions} questions &middot;
+            ${experimentSummary(e)} &middot;
             ${e.num_participants} participants &middot; ${e.completed_sessions} completed &middot;
             ${escapeHtml(e.created_at)}
           </div>
@@ -382,7 +420,7 @@ function copyToken(el) {
 // ---- Results ----
 
 function renderResults(id, data) {
-  const { sessions } = data;
+  const { experiment, sessions } = data;
   if (!sessions.length) return '<div class="empty">No results yet</div>';
 
   const completedSessions = sessions.filter(s => s.responses.length > 0);
@@ -396,6 +434,7 @@ function renderResults(id, data) {
     <table>
       <tr>
         <th>P#</th><th>Pattern</th><th>Q#</th>
+        <th>Study Videos</th><th>Test Image</th>
         <th>Between Videos (ms)</th><th>Focus %</th>
         <th>Choice Time</th><th>Chosen</th><th>Correct</th><th>Result</th>
       </tr>`;
@@ -410,11 +449,13 @@ function renderResults(id, data) {
           <td>${s.participant_number}</td>
           <td>${s.pattern_type}</td>
           <td>${r.question_index + 1}</td>
+          <td>${renderMediaPaths(r.study_video_paths)}</td>
+          <td>${escapeHtml(compactMediaPath(r.test_image_path))}</td>
           <td>${vpt}</td>
           <td>${vfp}</td>
           <td>${Math.round(r.choice_time_ms)} ms</td>
-          <td>${r.chosen_answer}</td>
-          <td>${r.correct_answer}</td>
+          <td>${answerLabel(experiment, r.chosen_answer)}</td>
+          <td>${answerLabel(experiment, r.correct_answer)}</td>
           <td class="${cls}">${r.is_correct ? 'Correct' : 'Wrong'}</td>
         </tr>`;
     }

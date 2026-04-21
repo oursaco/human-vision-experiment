@@ -88,6 +88,19 @@
     font-size: 2.2rem; font-weight: 800; color: #5b7fff;
     margin-bottom: 16px; min-height: 1.2em;
   }
+  .class-indicator {
+    width: 100%; max-width: 480px; min-height: 260px;
+    border: 1px solid #2a2d3a; border-radius: 10px;
+    background: #1a1d27;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center; padding: 40px 32px;
+  }
+  .class-indicator-title {
+    font-size: 2rem; font-weight: 800; color: #fff; margin-bottom: 12px;
+  }
+  .class-indicator-copy {
+    font-size: 1rem; line-height: 1.6; color: #c0c8e0;
+  }
   .video-slot {
     width: 100%; max-width: 480px; min-height: 320px;
     display: flex; justify-content: center; align-items: center;
@@ -105,7 +118,7 @@
   }
   .choices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
   .choice-btn {
-    width: 64px; height: 64px; border: 2px solid #2a2d3a;
+    min-width: 72px; height: 64px; padding: 0 20px; border: 2px solid #2a2d3a;
     border-radius: 10px; background: #1a1d27; color: #c0c8e0;
     font-size: 1.3rem; font-weight: 700; cursor: pointer;
     transition: border-color 0.15s, background 0.15s, transform 0.1s;
@@ -254,6 +267,9 @@ let session = null;       // { session_id, session_key, experiment, pattern_type
 let currentQ = 0;         // current question index
 let currentVid = 0;       // current video within a question's study phase
 let totalCorrect = 0;
+let currentStudyItems = [];
+let currentStudyFinalLabel = 'Proceed to Test';
+let studyNextAction = 'next_video';
 
 // per-question accumulators
 let qBetweenVideoTimes = [];
@@ -367,18 +383,88 @@ function isClassIdentificationTask() {
   return session?.experiment?.task_type === 'classify_class';
 }
 
+function isBlockedClassIdentificationTask() {
+  return (
+    session?.experiment?.task_type === 'classify_class' &&
+    session?.experiment?.task_variant === 'blocked_classify'
+  );
+}
+
+function blockChoiceOptions() {
+  const options = Array.isArray(session?.experiment?.choice_options) && session.experiment.choice_options.length
+    ? session.experiment.choice_options
+    : [
+      { value: 1, object_type: 'radials' },
+      { value: 2, object_type: 'chains' },
+    ];
+
+  return options.map(option => ({
+    ...option,
+    label: classLabelForObjectType(option.object_type) || option.label || String(option.value),
+  }));
+}
+
+function choiceLabel(value) {
+  if (!isBlockedClassIdentificationTask()) {
+    return String(value);
+  }
+
+  const match = blockChoiceOptions().find(option => option.value === value);
+  return match ? match.label : String(value);
+}
+
+function classLabelForObjectType(objectType) {
+  if (objectType === 'radials') {
+    return 'Class 1';
+  }
+  if (objectType === 'chains') {
+    return 'Class 2';
+  }
+  return '';
+}
+
+function orderStudyItemsByClass(items) {
+  return [...items]
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftPosition = classSortPosition(left.item?.object_type);
+      const rightPosition = classSortPosition(right.item?.object_type);
+      return leftPosition - rightPosition || left.index - right.index;
+    })
+    .map(entry => entry.item);
+}
+
+function classSortPosition(objectType) {
+  if (objectType === 'radials') return 0;
+  if (objectType === 'chains') return 1;
+  return 2;
+}
+
 // ============ Instructions ============
 
 function showInstructions() {
   const { experiment, questions } = session;
   const nQ = questions.length;
-  const nS = experiment.samples_per_question;
-  const instructionsHtml = isClassIdentificationTask()
+  const videosPerClass = experiment.videos_per_class || experiment.samples_per_question;
+  const instructionsHtml = isBlockedClassIdentificationTask()
+    ? `
+      <p>Welcome to the classification test. You will first study sample videos and then classify <strong>${nQ}</strong> still images.</p>
+      <p>For this session:</p>
+      <ol>
+        <li>You will watch <strong>${videosPerClass}</strong> Class 1 videos and <strong>${videosPerClass}</strong> Class 2 videos, one at a time.</li>
+        <li>Each sample video is labeled with its class.</li>
+        <li>After the study videos, you will see <strong>${nQ}</strong> still images from objects that were not shown in the videos.</li>
+        <li>For each image, choose whether it belongs to <strong>Class 1</strong> or <strong>Class 2</strong>.</li>
+      </ol>
+      <p class="note">Please watch each study video carefully and stay on this page during the test.</p>
+      <button class="btn btn-primary" id="btn-begin">Begin</button>
+    `
+    : isClassIdentificationTask()
     ? `
       <p>Welcome to the classification test. You will be presented with <strong>${nQ}</strong> questions.</p>
       <p>For each question:</p>
       <ol>
-        <li>You will watch <strong>${nS}</strong> short sample videos, one at a time, each labeled with a number.</li>
+        <li>You will watch <strong>${experiment.samples_per_question}</strong> short sample videos, one at a time, each labeled with a number.</li>
         <li>Each sample represents a different class.</li>
         <li>After both videos have played, you will see a still image from one of those classes.</li>
         <li>Select the number for the sample whose class matches the image.</li>
@@ -390,7 +476,7 @@ function showInstructions() {
       <p>Welcome to the classification test. You will be presented with <strong>${nQ}</strong> questions.</p>
       <p>For each question:</p>
       <ol>
-        <li>You will watch <strong>${nS}</strong> short videos one at a time, each labeled with a number.</li>
+        <li>You will watch <strong>${experiment.samples_per_question}</strong> short videos one at a time, each labeled with a number.</li>
         <li>After all videos have played, you will see a still image.</li>
         <li>Select the number that corresponds to the object in the image.</li>
       </ol>
@@ -423,29 +509,76 @@ function startQuestion() {
     return;
   }
 
-  const q = session.questions[currentQ];
-  const studyItems = q.study_items;
+  if (isBlockedClassIdentificationTask() && currentQ > 0) {
+    qBetweenVideoTimes = [];
+    qVideoFocusPcts = [];
+    showTestPhase();
+    return;
+  }
 
+  const q = session.questions[isBlockedClassIdentificationTask() ? 0 : currentQ];
+
+  currentStudyItems = isBlockedClassIdentificationTask()
+    ? orderStudyItemsByClass(q.study_items)
+    : q.study_items;
+  currentStudyFinalLabel = isBlockedClassIdentificationTask() ? 'Begin Test' : 'Proceed to Test';
   currentVid = 0;
   qBetweenVideoTimes = [];
   qVideoFocusPcts = [];
+  gapStartTime = 0;
 
-  $('study-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length} \u2014 Study Phase`;
+  $('study-bar').textContent = isBlockedClassIdentificationTask()
+    ? `Study Phase \u2014 ${session.questions.length} test images follow`
+    : `Question ${currentQ + 1} of ${session.questions.length} \u2014 Study Phase`;
   showScreen('screen-study');
-  showVideo(studyItems);
+  if (isBlockedClassIdentificationTask()) {
+    showClassIndicator();
+  } else {
+    showVideo();
+  }
 }
 
-function showVideo(studyItems) {
+function showClassIndicator() {
   const slot = $('video-slot');
   const nextBtn = $('btn-vid-next');
-  const currentItem = studyItems[currentVid];
-  const nS = studyItems.length;
+  const currentItem = currentStudyItems[currentVid];
+
+  $('study-progress').textContent = currentVid === 0 ? 'Study Block' : 'Next Study Block';
+  $('study-index').textContent = currentItem.label;
+
+  slot.innerHTML = '';
+  const indicator = document.createElement('div');
+  indicator.className = 'class-indicator';
+
+  const title = document.createElement('div');
+  title.className = 'class-indicator-title';
+  title.textContent = `${currentItem.label} Videos`;
+
+  const copy = document.createElement('div');
+  copy.className = 'class-indicator-copy';
+  copy.textContent = `You are going to start viewing ${currentItem.label} videos.`;
+
+  indicator.appendChild(title);
+  indicator.appendChild(copy);
+  slot.appendChild(indicator);
+
+  nextBtn.textContent = `Start ${currentItem.label} Videos`;
+  nextBtn.classList.remove('hidden');
+  studyNextAction = 'start_video';
+}
+
+function showVideo() {
+  const slot = $('video-slot');
+  const nextBtn = $('btn-vid-next');
+  const currentItem = currentStudyItems[currentVid];
+  const nS = currentStudyItems.length;
 
   $('study-progress').textContent = `Video ${currentVid + 1} of ${nS}`;
   $('study-index').textContent = currentItem.label;
 
   slot.innerHTML = '';
   nextBtn.classList.add('hidden');
+  studyNextAction = 'waiting_video';
 
   const video = document.createElement('video');
   video.src = currentItem.video_path;
@@ -465,44 +598,82 @@ function showVideo(studyItems) {
     $('study-index').textContent = '';
     gapStartTime = performance.now();
 
-    nextBtn.textContent = currentVid < nS - 1 ? 'Next' : 'Proceed to Test';
+    if (
+      isBlockedClassIdentificationTask() &&
+      currentVid < nS - 1 &&
+      currentStudyItems[currentVid + 1].object_type !== currentItem.object_type
+    ) {
+      currentVid++;
+      showClassIndicator();
+      return;
+    }
+
+    nextBtn.textContent = currentVid < nS - 1 ? 'Next' : currentStudyFinalLabel;
     nextBtn.classList.remove('hidden');
+    studyNextAction = currentVid < nS - 1 ? 'next_video' : 'test';
   });
 }
 
 $('btn-vid-next').addEventListener('click', () => {
-  const q = session.questions[currentQ];
-  const studyItems = q.study_items;
+  if (studyNextAction === 'start_video') {
+    recordStudyGap();
+    showVideo();
+    return;
+  }
 
-  qBetweenVideoTimes.push(performance.now() - gapStartTime);
+  if (studyNextAction === 'next_video') {
+    recordStudyGap();
+    currentVid++;
+    showVideo();
+    return;
+  }
 
-  currentVid++;
-  if (currentVid < studyItems.length) {
-    showVideo(studyItems);
-  } else {
+  if (studyNextAction === 'test') {
+    recordStudyGap();
     showTestPhase();
   }
 });
+
+function recordStudyGap() {
+  if (!gapStartTime) {
+    return;
+  }
+
+  qBetweenVideoTimes.push(performance.now() - gapStartTime);
+  gapStartTime = 0;
+}
 
 // ============ Test Phase ============
 
 function showTestPhase() {
   const q = session.questions[currentQ];
-  const nS = q.study_items.length;
 
-  $('test-bar').textContent = isClassIdentificationTask()
+  $('test-bar').textContent = isBlockedClassIdentificationTask()
+    ? `Image ${currentQ + 1} of ${session.questions.length} \u2014 Which class is this image from?`
+    : isClassIdentificationTask()
     ? `Question ${currentQ + 1} of ${session.questions.length} \u2014 Which sample class matches this image?`
     : `Question ${currentQ + 1} of ${session.questions.length} \u2014 Which index matches this object?`;
   $('test-img').src = q.test_image_path;
 
   const container = $('choices');
   container.innerHTML = '';
-  for (let i = 1; i <= nS; i++) {
-    const btn = document.createElement('button');
-    btn.className = 'choice-btn';
-    btn.textContent = i;
-    btn.addEventListener('click', () => submitAnswer(i));
-    container.appendChild(btn);
+  if (isBlockedClassIdentificationTask()) {
+    for (const option of blockChoiceOptions()) {
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.textContent = option.label;
+      btn.addEventListener('click', () => submitAnswer(option.value));
+      container.appendChild(btn);
+    }
+  } else {
+    const nS = q.study_items.length;
+    for (let i = 1; i <= nS; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.textContent = i;
+      btn.addEventListener('click', () => submitAnswer(i));
+      container.appendChild(btn);
+    }
   }
 
   choiceShowTime = performance.now();
@@ -511,18 +682,22 @@ function showTestPhase() {
 
 async function submitAnswer(chosen) {
   const choiceTime = performance.now() - choiceShowTime;
+  const payload = {
+    question_index: currentQ,
+    choice_time_ms: choiceTime,
+    chosen_answer: chosen
+  };
+
+  if (!isBlockedClassIdentificationTask() || currentQ === 0) {
+    payload.video_page_times = qBetweenVideoTimes;
+    payload.video_focus_percentages = qVideoFocusPcts;
+  }
 
   // disable buttons
   $('choices').querySelectorAll('button').forEach(b => b.disabled = true);
 
   try {
-    const result = await sessionApi('POST', `/api/sessions/${session.session_id}/responses`, {
-      question_index: currentQ,
-      video_page_times: qBetweenVideoTimes,
-      video_focus_percentages: qVideoFocusPcts,
-      choice_time_ms: choiceTime,
-      chosen_answer: chosen
-    });
+    const result = await sessionApi('POST', `/api/sessions/${session.session_id}/responses`, payload);
 
     if (result.is_correct) totalCorrect++;
     showQuestionResult(chosen, result, choiceTime);
@@ -546,14 +721,18 @@ function showQuestionResult(chosen, result, choiceTime) {
   $('result-verdict').textContent = result.is_correct ? 'Correct' : 'Incorrect';
   $('result-verdict').className = 'result-verdict ' + (result.is_correct ? 'v-correct' : 'v-incorrect');
   $('result-detail').textContent = result.is_correct
-    ? `You selected ${chosen}`
-    : `You selected ${chosen} \u2014 correct answer was ${result.correct_answer}`;
+    ? `You selected ${choiceLabel(chosen)}`
+    : `You selected ${choiceLabel(chosen)} \u2014 correct answer was ${choiceLabel(result.correct_answer)}`;
   $('result-time').textContent = (choiceTime / 1000).toFixed(2) + 's';
 
-  $('result-bar').textContent = `Question ${currentQ + 1} of ${session.questions.length}`;
+  $('result-bar').textContent = isBlockedClassIdentificationTask()
+    ? `Image ${currentQ + 1} of ${session.questions.length}`
+    : `Question ${currentQ + 1} of ${session.questions.length}`;
 
   const isLast = currentQ >= session.questions.length - 1;
-  $('btn-next-q').textContent = isLast ? 'Finish' : 'Next Question';
+  $('btn-next-q').textContent = isLast
+    ? 'Finish'
+    : (isBlockedClassIdentificationTask() ? 'Next Image' : 'Next Question');
 
   showScreen('screen-result');
 }

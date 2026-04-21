@@ -9,7 +9,10 @@ const OBJECT_TYPES = ['radials', 'chains'];
 const LEGACY_TASK_TYPE = 'match_sample';
 const CLASS_IDENTIFICATION_TASK_TYPE = 'classify_class';
 const CLASS_EXPERIMENT_OBJECT_TYPE = 'radials_vs_chains';
-const FIXED_CLASS_SAMPLES_PER_QUESTION = 2;
+const LEGACY_CLASS_TASK_VARIANT = 'two_sample_match';
+const BLOCK_CLASS_TASK_VARIANT = 'blocked_classify';
+const DEFAULT_CLASS_VIDEOS_PER_CLASS = 2;
+const PATTERN_TYPES = ['continuous', 'discontinuous'];
 const TOKEN_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_REQUEST_BODY = '32kb';
 const MAX_EXPERIMENT_NAME_LENGTH = 120;
@@ -104,28 +107,50 @@ app.post('/api/experiments', (req, res) => {
   const taskType = typeof req.body.task_type === 'string'
     ? req.body.task_type
     : CLASS_IDENTIFICATION_TASK_TYPE;
-  const samplesPerQuestion = toInteger(req.body.samples_per_question) ?? FIXED_CLASS_SAMPLES_PER_QUESTION;
+  const samplesPerQuestion = toInteger(req.body.samples_per_question) ?? DEFAULT_CLASS_VIDEOS_PER_CLASS;
   const numQuestions = toInteger(req.body.num_questions);
   const numParticipants = toInteger(req.body.num_participants);
 
   if (taskType !== CLASS_IDENTIFICATION_TASK_TYPE) {
     return res.status(400).json({ error: `task_type must be ${CLASS_IDENTIFICATION_TASK_TYPE}` });
   }
-  if (samplesPerQuestion !== FIXED_CLASS_SAMPLES_PER_QUESTION) {
-    return res.status(400).json({
-      error: `samples_per_question must be exactly ${FIXED_CLASS_SAMPLES_PER_QUESTION} for this experiment`,
-    });
-  }
-  if (OBJECT_TYPES.some(objectType => datasetCatalog[objectType].length < 2)) {
-    return res.status(500).json({
-      error: 'Each class must have at least two dataset items for class-identification experiments',
-    });
+  if (!Number.isInteger(samplesPerQuestion) || samplesPerQuestion < 1) {
+    return res.status(400).json({ error: 'samples_per_question must be at least 1' });
   }
   if (!Number.isInteger(numQuestions) || numQuestions < 1 || numQuestions > 100) {
     return res.status(400).json({ error: 'num_questions must be 1-100' });
   }
   if (!Number.isInteger(numParticipants) || numParticipants < 1 || numParticipants > 200) {
     return res.status(400).json({ error: 'num_participants must be 1-200' });
+  }
+
+  const remainingTestItemsByType = {};
+  for (const objectType of OBJECT_TYPES) {
+    const availableCount = datasetCatalog[objectType].length;
+    if (availableCount < samplesPerQuestion) {
+      return res.status(400).json({
+        error: `Not enough ${objectTypeLabel(objectType)} items to sample ${samplesPerQuestion} study videos`,
+      });
+    }
+    remainingTestItemsByType[objectType] = availableCount - samplesPerQuestion;
+  }
+
+  const totalRemainingTestItems = OBJECT_TYPES.reduce(
+    (sum, objectType) => sum + remainingTestItemsByType[objectType],
+    0
+  );
+  if (numQuestions > totalRemainingTestItems) {
+    return res.status(400).json({
+      error: `Only ${totalRemainingTestItems} unseen test images remain after sampling ${samplesPerQuestion} videos per class`,
+    });
+  }
+  if (
+    numQuestions >= OBJECT_TYPES.length &&
+    OBJECT_TYPES.some(objectType => remainingTestItemsByType[objectType] < 1)
+  ) {
+    return res.status(400).json({
+      error: 'At least one unseen test image must remain in each class when using two or more test images',
+    });
   }
 
   const insertExperiment = db.prepare(
@@ -135,11 +160,19 @@ app.post('/api/experiments', (req, res) => {
       samples_per_question,
       num_questions,
       num_participants,
-      task_type
-    ) VALUES (?, ?, ?, ?, ?, ?)`
+      task_type,
+      task_variant
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   const insertQuestion = db.prepare(
-    'INSERT INTO questions (experiment_id, question_index, sampled_indices, test_object_index, correct_position) VALUES (?, ?, ?, ?, ?)'
+    `INSERT INTO questions (
+      experiment_id,
+      question_index,
+      sampled_indices,
+      test_object_index,
+      correct_position,
+      media_manifest
+    ) VALUES (?, ?, ?, ?, ?, ?)`
   );
   const insertToken = db.prepare(
     'INSERT INTO tokens (experiment_id, token, pattern_type, participant_number) VALUES (?, ?, ?, ?)'
@@ -153,38 +186,65 @@ app.post('/api/experiments', (req, res) => {
       samplesPerQuestion,
       numQuestions,
       numParticipants,
-      CLASS_IDENTIFICATION_TASK_TYPE
+      CLASS_IDENTIFICATION_TASK_TYPE,
+      BLOCK_CLASS_TASK_VARIANT
     );
 
+    const sampledIndicesByType = Object.fromEntries(
+      OBJECT_TYPES.map(objectType => [objectType, new Set()])
+    );
+    const sampled = OBJECT_TYPES.flatMap(objectType =>
+      sampleItems(datasetCatalog[objectType], samplesPerQuestion)
+        .map(objectIndex => {
+          sampledIndicesByType[objectType].add(objectIndex);
+          return {
+            object_type: objectType,
+            object_index: objectIndex,
+          };
+        })
+    );
+    const testPools = Object.fromEntries(
+      OBJECT_TYPES.map(objectType => [
+        objectType,
+        datasetCatalog[objectType]
+          .filter(objectIndex => !sampledIndicesByType[objectType].has(objectIndex))
+          .map(objectIndex => ({
+            object_type: objectType,
+            object_index: objectIndex,
+          })),
+      ])
+    );
+    const testItems = sampleClassTestItems(testPools, numQuestions);
+
     for (let questionIndex = 0; questionIndex < numQuestions; questionIndex += 1) {
-      const sampled = shuffle(
-        OBJECT_TYPES.map(objectType => ({
-          object_type: objectType,
-          object_index: sampleItems(datasetCatalog[objectType], 1)[0],
-        }))
-      );
-      const correctChoiceIndex = Math.floor(Math.random() * samplesPerQuestion);
-      const correctSample = sampled[correctChoiceIndex];
-      const testPool = datasetCatalog[correctSample.object_type].filter(
-        objectIndex => objectIndex !== correctSample.object_index
-      );
-      const testObjectIndex = sampleItems(
-        testPool.length ? testPool : datasetCatalog[correctSample.object_type],
-        1
-      )[0];
+      const testItem = testItems[questionIndex];
+
+      const sampledIndices = JSON.stringify(sampled);
+      const correctPosition = classChoicePosition(testItem.object_type);
+      const questionRecord = {
+        question_index: questionIndex,
+        sampled_indices: sampledIndices,
+        test_object_index: testItem.object_index,
+        correct_position: correctPosition,
+      };
 
       insertQuestion.run(
         experimentId,
         questionIndex,
-        JSON.stringify(sampled),
-        testObjectIndex,
-        correctChoiceIndex + 1
+        sampledIndices,
+        testItem.object_index,
+        correctPosition,
+        JSON.stringify(buildQuestionMediaManifest({
+          object_type: CLASS_EXPERIMENT_OBJECT_TYPE,
+          task_type: CLASS_IDENTIFICATION_TASK_TYPE,
+          task_variant: BLOCK_CLASS_TASK_VARIANT,
+        }, questionRecord))
       );
     }
 
     const issuedTokens = new Set();
     for (let participantNumber = 1; participantNumber <= numParticipants; participantNumber += 1) {
-      for (const patternType of ['continuous', 'discontinuous']) {
+      for (const patternType of PATTERN_TYPES) {
         let token;
         do {
           token = generateToken();
@@ -256,12 +316,14 @@ app.get('/api/experiments/:id/results', (req, res) => {
   const sessions = db.prepare(
     'SELECT * FROM sessions WHERE experiment_id = ? ORDER BY participant_number, pattern_type, id'
   ).all(experiment.id);
+  const questions = questionsByIndex(experiment.id);
   const getResponses = db.prepare(
     'SELECT * FROM responses WHERE session_id = ? ORDER BY question_index'
   );
 
   for (const session of sessions) {
-    session.responses = getResponses.all(session.id);
+    session.responses = getResponses.all(session.id)
+      .map(response => enrichResponseMedia(experiment, questions, session, response));
   }
 
   res.json({ experiment, sessions });
@@ -281,6 +343,7 @@ app.get('/api/experiments/:id/results/csv', (req, res) => {
   const sessions = db.prepare(
     'SELECT * FROM sessions WHERE experiment_id = ? ORDER BY participant_number, pattern_type, id'
   ).all(experiment.id);
+  const questions = questionsByIndex(experiment.id);
   const getResponses = db.prepare(
     'SELECT * FROM responses WHERE session_id = ? ORDER BY question_index'
   );
@@ -292,6 +355,8 @@ app.get('/api/experiments/:id/results/csv', (req, res) => {
       'pattern_type',
       'instruction_time_ms',
       'question',
+      'study_videos',
+      'test_image',
       'between_video_times',
       'video_focus_pcts',
       'choice_time_ms',
@@ -304,12 +369,19 @@ app.get('/api/experiments/:id/results/csv', (req, res) => {
   for (const session of sessions) {
     const responses = getResponses.all(session.id);
     for (const response of responses) {
+      const media = responseMediaForPattern(
+        experiment,
+        questions.get(response.question_index),
+        session.pattern_type
+      );
       rows.push([
         session.id,
         session.participant_number,
         session.pattern_type,
         session.instruction_time_ms ?? '',
         response.question_index + 1,
+        media.study_video_paths.join(' | '),
+        media.test_image_path,
         response.video_page_times ?? '',
         response.video_focus_percentages ?? '',
         response.choice_time_ms ?? '',
@@ -405,8 +477,11 @@ app.post('/api/sessions', sessionCreationLimiter, (req, res) => {
     experiment: {
       object_type: experiment.object_type,
       samples_per_question: experiment.samples_per_question,
+      videos_per_class: experiment.samples_per_question,
       num_questions: experiment.num_questions,
       task_type: experiment.task_type || LEGACY_TASK_TYPE,
+      task_variant: experiment.task_variant || LEGACY_CLASS_TASK_VARIANT,
+      choice_options: isBlockClassExperiment(experiment) ? classChoiceOptions() : [],
     },
     pattern_type: tokenRecord.pattern_type,
     questions,
@@ -481,29 +556,40 @@ app.post(
     }
 
     const chosenAnswer = toInteger(req.body.chosen_answer);
-    if (!Number.isInteger(chosenAnswer) || chosenAnswer < 1 || chosenAnswer > experiment.samples_per_question) {
+    const maxChoice = isBlockClassExperiment(experiment)
+      ? classChoiceOptions().length
+      : experiment.samples_per_question;
+    if (!Number.isInteger(chosenAnswer) || chosenAnswer < 1 || chosenAnswer > maxChoice) {
       return res.status(400).json({ error: 'chosen_answer is out of range' });
     }
 
-    const videoPageTimes = normalizeNumberArray(
+    const expectedVideoMetricCount = isBlockClassExperiment(experiment)
+      ? (questionIndex === 0 ? parseStudyItems(question.sampled_indices, null).length : 0)
+      : experiment.samples_per_question;
+
+    const videoPageTimes = normalizeSubmittedNumberArray(
       req.body.video_page_times,
-      experiment.samples_per_question,
+      expectedVideoMetricCount,
       { min: 0, max: MAX_TIMING_MS, round: true }
     );
     if (!videoPageTimes) {
       return res.status(400).json({
-        error: `video_page_times must be an array of ${experiment.samples_per_question} numbers`,
+        error: expectedVideoMetricCount
+          ? `video_page_times must be an array of ${expectedVideoMetricCount} numbers`
+          : 'video_page_times must be omitted after the study block',
       });
     }
 
-    const videoFocusPercentages = normalizeNumberArray(
+    const videoFocusPercentages = normalizeSubmittedNumberArray(
       req.body.video_focus_percentages,
-      experiment.samples_per_question,
+      expectedVideoMetricCount,
       { min: 0, max: 100, round: false }
     );
     if (!videoFocusPercentages) {
       return res.status(400).json({
-        error: `video_focus_percentages must be an array of ${experiment.samples_per_question} numbers`,
+        error: expectedVideoMetricCount
+          ? `video_focus_percentages must be an array of ${expectedVideoMetricCount} numbers`
+          : 'video_focus_percentages must be omitted after the study block',
       });
     }
 
@@ -526,11 +612,11 @@ app.post(
           correct_answer,
           is_correct
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
+        ).run(
         session.id,
         questionIndex,
-        JSON.stringify(videoPageTimes),
-        JSON.stringify(videoFocusPercentages),
+        videoPageTimes.length ? JSON.stringify(videoPageTimes) : null,
+        videoFocusPercentages.length ? JSON.stringify(videoFocusPercentages) : null,
         Math.round(choiceTimeMs),
         chosenAnswer,
         question.correct_position,
@@ -644,7 +730,8 @@ function initializeDatabase() {
       question_index INTEGER NOT NULL,
       sampled_indices TEXT NOT NULL,
       test_object_index INTEGER NOT NULL,
-      correct_position INTEGER NOT NULL
+      correct_position INTEGER NOT NULL,
+      media_manifest TEXT
     );
 
     CREATE TABLE IF NOT EXISTS tokens (
@@ -681,6 +768,8 @@ function initializeDatabase() {
   `);
 
   ensureColumn('experiments', 'task_type', `TEXT NOT NULL DEFAULT '${LEGACY_TASK_TYPE}'`);
+  ensureColumn('experiments', 'task_variant', `TEXT NOT NULL DEFAULT '${LEGACY_CLASS_TASK_VARIANT}'`);
+  ensureColumn('questions', 'media_manifest', 'TEXT');
   ensureColumn('sessions', 'session_key_hash', 'TEXT');
   ensureColumn('sessions', 'completed_at', 'TEXT');
 
@@ -689,6 +778,8 @@ function initializeDatabase() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_responses_session_question_index
       ON responses(session_id, question_index);
   `);
+
+  backfillQuestionMediaManifests();
 }
 
 function ensureColumn(tableName, columnName, definition) {
@@ -779,33 +870,280 @@ function sampleItems(items, count) {
   return shuffle(items).slice(0, count);
 }
 
-function buildParticipantQuestion(experiment, question, patternType) {
-  const taskType = experiment.task_type || LEGACY_TASK_TYPE;
-  const studyItems = parseStudyItems(
-    question.sampled_indices,
-    taskType === CLASS_IDENTIFICATION_TASK_TYPE ? null : experiment.object_type
+function sampleClassTestItems(testPools, count) {
+  const pools = Object.fromEntries(
+    OBJECT_TYPES.map(objectType => [objectType, shuffle(testPools[objectType] || [])])
   );
+  const selected = [];
 
-  if (!studyItems.length) {
+  if (count >= OBJECT_TYPES.length && OBJECT_TYPES.every(objectType => pools[objectType].length > 0)) {
+    for (const objectType of shuffle(OBJECT_TYPES)) {
+      selected.push(pools[objectType].pop());
+    }
+  }
+
+  while (selected.length < count) {
+    const availableTypes = OBJECT_TYPES.filter(objectType => pools[objectType].length > 0);
+    if (!availableTypes.length) {
+      throw new Error('Not enough unseen test images remain after sampling study videos');
+    }
+
+    const selectedType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+    selected.push(pools[selectedType].pop());
+  }
+
+  return shuffle(selected);
+}
+
+function buildParticipantQuestion(experiment, question, patternType) {
+  const media = responseMediaForPattern(experiment, question, patternType);
+
+  if (!media.study_items.length) {
     throw new Error(`Question ${question.question_index} is missing study items`);
   }
 
-  const testImagePath = taskType === CLASS_IDENTIFICATION_TASK_TYPE
-    ? participantPngPath(studyItems[question.correct_position - 1]?.object_type, question.test_object_index)
-    : participantPngPath(experiment.object_type, question.test_object_index);
-
-  if (!testImagePath) {
+  if (!media.test_image_path) {
     throw new Error(`Question ${question.question_index} has an invalid test image`);
   }
 
   return {
     question_index: question.question_index,
-    study_items: studyItems.map((item, index) => ({
-      label: index + 1,
-      video_path: participantVideoPath(item.object_type, item.object_index, patternType),
+    study_items: media.study_items.map(item => ({
+      label: item.label,
+      object_type: item.object_type,
+      video_path: item.video_path,
     })),
-    test_image_path: testImagePath,
+    test_image_path: media.test_image_path,
   };
+}
+
+function questionsByIndex(experimentId) {
+  return new Map(
+    db.prepare('SELECT * FROM questions WHERE experiment_id = ? ORDER BY question_index')
+      .all(experimentId)
+      .map(question => [question.question_index, question])
+  );
+}
+
+function enrichResponseMedia(experiment, questions, session, response) {
+  const media = responseMediaForPattern(
+    experiment,
+    questions.get(response.question_index),
+    session.pattern_type
+  );
+
+  return {
+    ...response,
+    study_video_paths: media.study_video_paths,
+    study_media: media.study_items.map(item => ({
+      label: item.label,
+      object_type: item.object_type,
+      object_index: item.object_index,
+      video_path: item.video_path,
+    })),
+    test_image_path: media.test_image_path,
+    test_media: media.test_image,
+  };
+}
+
+function responseMediaForPattern(experiment, question, patternType) {
+  if (!question) {
+    return {
+      study_items: [],
+      study_video_paths: [],
+      test_image_path: '',
+      test_image: null,
+    };
+  }
+
+  const taskType = experiment.task_type || LEGACY_TASK_TYPE;
+  const isBlockTask = isBlockClassExperiment(experiment);
+  const fallbackStudyItems = parseStudyItems(
+    question.sampled_indices,
+    taskType === CLASS_IDENTIFICATION_TASK_TYPE ? null : experiment.object_type
+  );
+  const manifest = parseQuestionMediaManifest(question.media_manifest);
+  const manifestStudyVideos = Array.isArray(manifest?.study_videos)
+    ? manifest.study_videos
+    : [];
+  const orderedFallbackStudyItems = isBlockTask
+    ? orderStudyItemsByClass(fallbackStudyItems)
+    : fallbackStudyItems;
+  const sourceStudyItems = isBlockTask
+    ? orderStudyItemsByClass(manifestStudyVideos.length ? manifestStudyVideos : orderedFallbackStudyItems)
+    : (manifestStudyVideos.length ? manifestStudyVideos : fallbackStudyItems);
+
+  const studyItems = sourceStudyItems
+    .map((item, index) => {
+      const fallback = orderedFallbackStudyItems[index] || {};
+      const objectType = isObjectType(item.object_type) ? item.object_type : fallback.object_type;
+      const objectIndex = toInteger(item.object_index ?? fallback.object_index);
+      const videoPath = studyVideoPathForPattern(item, objectType, objectIndex, patternType);
+
+      if (!isObjectType(objectType) || !Number.isInteger(objectIndex) || !videoPath) {
+        return null;
+      }
+
+      return {
+        label: isBlockTask ? objectTypeLabel(objectType) : (item.label ?? index + 1),
+        object_type: objectType,
+        object_index: objectIndex,
+        video_path: videoPath,
+      };
+    })
+    .filter(Boolean);
+
+  const fallbackTestObjectType = questionTestObjectType(experiment, question, fallbackStudyItems);
+  const fallbackTestObjectIndex = toInteger(question.test_object_index);
+  const manifestTestImage = manifest?.test_image && typeof manifest.test_image === 'object'
+    ? manifest.test_image
+    : null;
+  const testObjectType = isObjectType(manifestTestImage?.object_type)
+    ? manifestTestImage.object_type
+    : fallbackTestObjectType;
+  const testObjectIndex = toInteger(manifestTestImage?.object_index ?? fallbackTestObjectIndex);
+  const testImagePath = typeof manifestTestImage?.path === 'string' && manifestTestImage.path
+    ? manifestTestImage.path
+    : participantPngPath(testObjectType, testObjectIndex);
+  const testImage = testImagePath
+    ? {
+      object_type: testObjectType,
+      object_index: testObjectIndex,
+      path: testImagePath,
+    }
+    : null;
+
+  return {
+    study_items: studyItems,
+    study_video_paths: studyItems.map(item => item.video_path),
+    test_image_path: testImagePath,
+    test_image: testImage,
+  };
+}
+
+function buildQuestionMediaManifest(experiment, question) {
+  const taskType = experiment.task_type || LEGACY_TASK_TYPE;
+  const isBlockTask = isBlockClassExperiment(experiment);
+  const parsedStudyItems = parseStudyItems(
+    question.sampled_indices,
+    taskType === CLASS_IDENTIFICATION_TASK_TYPE ? null : experiment.object_type
+  );
+  const studyItems = isBlockTask ? orderStudyItemsByClass(parsedStudyItems) : parsedStudyItems;
+  const testObjectType = questionTestObjectType(experiment, question, studyItems);
+  const testObjectIndex = toInteger(question.test_object_index);
+
+  return {
+    version: 1,
+    study_videos: studyItems.map((item, index) => ({
+      label: isBlockTask ? objectTypeLabel(item.object_type) : index + 1,
+      object_type: item.object_type,
+      object_index: item.object_index,
+      video_paths: Object.fromEntries(
+        PATTERN_TYPES.map(patternType => [
+          patternType,
+          participantVideoPath(item.object_type, item.object_index, patternType),
+        ])
+      ),
+    })),
+    test_image: {
+      object_type: testObjectType,
+      object_index: testObjectIndex,
+      path: participantPngPath(testObjectType, testObjectIndex),
+    },
+  };
+}
+
+function orderStudyItemsByClass(items) {
+  return [...items]
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftPosition = classSortPosition(left.item?.object_type);
+      const rightPosition = classSortPosition(right.item?.object_type);
+      return leftPosition - rightPosition || left.index - right.index;
+    })
+    .map(entry => entry.item);
+}
+
+function classSortPosition(objectType) {
+  const position = OBJECT_TYPES.indexOf(objectType);
+  return position >= 0 ? position : OBJECT_TYPES.length;
+}
+
+function questionTestObjectType(experiment, question, studyItems) {
+  const taskType = experiment.task_type || LEGACY_TASK_TYPE;
+
+  if (isBlockClassExperiment(experiment)) {
+    return classChoiceObjectType(question.correct_position);
+  }
+
+  if (taskType === CLASS_IDENTIFICATION_TASK_TYPE) {
+    return studyItems[question.correct_position - 1]?.object_type || '';
+  }
+
+  return experiment.object_type;
+}
+
+function parseQuestionMediaManifest(serializedManifest) {
+  if (!serializedManifest) {
+    return null;
+  }
+
+  try {
+    const manifest = JSON.parse(serializedManifest);
+    return manifest && typeof manifest === 'object' ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
+function studyVideoPathForPattern(item, objectType, objectIndex, patternType) {
+  if (item?.video_paths && typeof item.video_paths === 'object') {
+    const pathForPattern = item.video_paths[patternType];
+    if (typeof pathForPattern === 'string' && pathForPattern) {
+      return pathForPattern;
+    }
+  }
+
+  if (typeof item?.video_path === 'string' && item.video_path) {
+    return item.video_path;
+  }
+
+  if (!isObjectType(objectType) || !Number.isInteger(objectIndex)) {
+    return '';
+  }
+
+  return participantVideoPath(objectType, objectIndex, patternType);
+}
+
+function backfillQuestionMediaManifests() {
+  const missingManifests = db.prepare(
+    `SELECT
+      q.*,
+      e.object_type AS experiment_object_type,
+      e.task_type,
+      e.task_variant
+    FROM questions q
+    JOIN experiments e ON e.id = q.experiment_id
+    WHERE q.media_manifest IS NULL OR q.media_manifest = ''`
+  ).all();
+
+  if (!missingManifests.length) {
+    return;
+  }
+
+  const updateManifest = db.prepare('UPDATE questions SET media_manifest = ? WHERE id = ?');
+  const txn = db.transaction(rows => {
+    for (const row of rows) {
+      const experiment = {
+        object_type: row.experiment_object_type,
+        task_type: row.task_type,
+        task_variant: row.task_variant,
+      };
+      updateManifest.run(JSON.stringify(buildQuestionMediaManifest(experiment, row)), row.id);
+    }
+  });
+
+  txn(missingManifests);
 }
 
 function parseStudyItems(serializedStudyItems, fallbackObjectType) {
@@ -879,6 +1217,40 @@ function isObjectType(value) {
   return OBJECT_TYPES.includes(value);
 }
 
+function isBlockClassExperiment(experiment) {
+  return (
+    experiment?.task_type === CLASS_IDENTIFICATION_TASK_TYPE &&
+    (experiment?.task_variant || LEGACY_CLASS_TASK_VARIANT) === BLOCK_CLASS_TASK_VARIANT
+  );
+}
+
+function classChoiceOptions() {
+  return OBJECT_TYPES.map((objectType, index) => ({
+    value: index + 1,
+    object_type: objectType,
+    label: objectTypeLabel(objectType),
+  }));
+}
+
+function classChoicePosition(objectType) {
+  const position = OBJECT_TYPES.indexOf(objectType);
+  return position >= 0 ? position + 1 : 0;
+}
+
+function classChoiceObjectType(position) {
+  return OBJECT_TYPES[position - 1] || '';
+}
+
+function objectTypeLabel(objectType) {
+  if (objectType === 'radials') {
+    return 'Class 1';
+  }
+  if (objectType === 'chains') {
+    return 'Class 2';
+  }
+  return objectType;
+}
+
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
@@ -929,6 +1301,14 @@ function normalizeNumberArray(value, expectedLength, options) {
   }
 
   return normalized;
+}
+
+function normalizeSubmittedNumberArray(value, expectedLength, options) {
+  if (value == null) {
+    return expectedLength === 0 ? [] : null;
+  }
+
+  return normalizeNumberArray(value, expectedLength, options);
 }
 
 function sanitizeExperimentName(value) {

@@ -34,8 +34,8 @@ async function main() {
     const created = await request(baseUrl, 'POST', '/api/experiments', {
       name: 'Smoke Test',
       task_type: 'classify_class',
-      samples_per_question: 2,
-      num_questions: 1,
+      samples_per_question: 1,
+      num_questions: 2,
       num_participants: 1,
     }, {
       Authorization: adminAuth,
@@ -45,10 +45,38 @@ async function main() {
       throw new Error('Experiment creation did not return the expected tokens');
     }
 
+    const storedQuestions = db.prepare(
+      'SELECT media_manifest FROM questions WHERE experiment_id = ? ORDER BY question_index'
+    ).all(created.experiment.id);
+    if (storedQuestions.length !== 2) {
+      throw new Error('Experiment creation did not store the expected question manifests');
+    }
+
+    const firstManifest = JSON.parse(storedQuestions[0].media_manifest);
+    if (
+      !Array.isArray(firstManifest.study_videos) ||
+      firstManifest.study_videos.length !== 2 ||
+      !firstManifest.study_videos.every(item => (
+        item.video_paths?.continuous &&
+        item.video_paths?.discontinuous
+      )) ||
+      !firstManifest.test_image?.path
+    ) {
+      throw new Error('Question media manifest did not store the expected videos/images');
+    }
+
     const participantToken = created.tokens[0].token;
     const session = await request(baseUrl, 'POST', '/api/sessions', { token: participantToken });
     if (!session.session_key) {
       throw new Error('Session creation did not return a session key');
+    }
+    const choiceLabels = (session.experiment.choice_options || []).map(option => option.label);
+    if (choiceLabels.join('|') !== 'Class 1|Class 2') {
+      throw new Error('Session choice labels were not returned as Class 1/Class 2');
+    }
+    const studyLabels = session.questions[0].study_items.map(item => item.label);
+    if (studyLabels.join('|') !== 'Class 1|Class 2') {
+      throw new Error('Study items were not grouped and labeled as Class 1/Class 2');
     }
 
     await request(
@@ -76,6 +104,18 @@ async function main() {
     await request(
       baseUrl,
       'POST',
+      `/api/sessions/${session.session_id}/responses`,
+      {
+        question_index: 1,
+        choice_time_ms: 625,
+        chosen_answer: 2,
+      },
+      { 'X-Session-Key': session.session_key }
+    );
+
+    await request(
+      baseUrl,
+      'POST',
       `/api/sessions/${session.session_id}/complete`,
       {},
       { 'X-Session-Key': session.session_key }
@@ -91,6 +131,26 @@ async function main() {
 
     if (!results.sessions || results.sessions.length !== 1) {
       throw new Error('Results endpoint did not return the expected session data');
+    }
+
+    const firstResponse = results.sessions[0].responses[0];
+    if (
+      !Array.isArray(firstResponse.study_video_paths) ||
+      firstResponse.study_video_paths.length !== 2 ||
+      !firstResponse.test_image_path
+    ) {
+      throw new Error('Results endpoint did not include resolved media paths');
+    }
+
+    const csv = await request(
+      baseUrl,
+      'GET',
+      `/api/experiments/${created.experiment.id}/results/csv`,
+      undefined,
+      { Authorization: adminAuth }
+    );
+    if (!csv.includes('study_videos') || !csv.includes('test_image') || !csv.includes(firstResponse.test_image_path)) {
+      throw new Error('CSV export did not include media paths');
     }
 
     console.log('Smoke test passed.');
