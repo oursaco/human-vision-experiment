@@ -33,6 +33,7 @@ const config = {
   dbPath: path.resolve(process.env.DB_PATH || DEFAULT_DB_PATH),
   adminUsername: process.env.ADMIN_USERNAME || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || '',
+  surveyCompletionRedirectUrl: normalizeRedirectUrl(process.env.SURVEY_COMPLETION_REDIRECT_URL),
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 };
 
@@ -639,7 +640,7 @@ app.post(
   (req, res) => {
     const session = req.sessionRecord;
     if (session.completed) {
-      return res.json({ ok: true });
+      return res.json(buildCompletionPayload());
     }
 
     const experiment = db.prepare('SELECT * FROM experiments WHERE id = ?').get(session.experiment_id);
@@ -661,7 +662,7 @@ app.post(
       "UPDATE sessions SET completed = 1, completed_at = COALESCE(completed_at, datetime('now')) WHERE id = ?"
     ).run(session.id);
 
-    res.json({ ok: true });
+    res.json(buildCompletionPayload());
   }
 );
 
@@ -1272,6 +1273,31 @@ function parseTrustProxy(value) {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) ? parsed : value;
+}
+
+function normalizeRedirectUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed, 'http://localhost');
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return trimmed;
+    }
+  } catch {
+    // Fall through to the explicit startup error below.
+  }
+
+  throw new Error('SURVEY_COMPLETION_REDIRECT_URL must be an http(s) URL or same-site path');
+}
+
+function buildCompletionPayload() {
+  return {
+    ok: true,
+    redirect_url: config.surveyCompletionRedirectUrl || null,
+  };
 }
 
 function toInteger(value) {

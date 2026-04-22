@@ -730,8 +730,9 @@ $('btn-next-q').addEventListener('click', () => {
 // ============ Completion ============
 
 async function finishTest() {
+  let completion;
   try {
-    await sessionApi('POST', `/api/sessions/${session.session_id}/complete`);
+    completion = await sessionApi('POST', `/api/sessions/${session.session_id}/complete`);
   } catch (error) {
     if (error.message.includes('session key')) {
       resetToTokenEntry('Your session expired. Enter your token again.');
@@ -741,6 +742,10 @@ async function finishTest() {
     return;
   }
   sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
+  if (completion?.redirect_url) {
+    window.location.assign(completion.redirect_url);
+    return;
+  }
   showScreen('screen-complete');
 }
 

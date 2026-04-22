@@ -12,6 +12,7 @@ async function main() {
   process.env.DB_PATH = dbPath;
   process.env.ADMIN_USERNAME = 'admin';
   process.env.ADMIN_PASSWORD = 'smoke-test-password';
+  process.env.SURVEY_COMPLETION_REDIRECT_URL = 'https://example.com/complete';
 
   const { db, startServer } = require('../server.js');
   const server = startServer();
@@ -119,13 +120,16 @@ async function main() {
       { 'X-Session-Key': session.session_key }
     );
 
-    await request(
+    const completion = await request(
       baseUrl,
       'POST',
       `/api/sessions/${session.session_id}/complete`,
       {},
       { 'X-Session-Key': session.session_key }
     );
+    if (completion.redirect_url !== 'https://example.com/complete') {
+      throw new Error('Completion endpoint did not return the configured redirect URL');
+    }
 
     const results = await request(
       baseUrl,

@@ -28,6 +28,7 @@ Copy `.env.example` and set at least:
 - `TRUST_PROXY=1` if the app sits behind Nginx, Caddy, Cloudflare, Render, Railway, Fly.io, or another proxy
 
 `ADMIN_USERNAME` defaults to `admin`.
+Set `SURVEY_COMPLETION_REDIRECT_URL` to redirect participants after their completed session is saved. Use the full `https://...` URL for off-site redirects; leave it unset to show the built-in completion screen.
 
 ## Local run
 
@@ -75,5 +76,6 @@ docker run \
 3. Mount persistent storage and point `DB_PATH` at it.
 4. Put the app behind HTTPS.
 5. Set `TRUST_PROXY=1` when behind a reverse proxy.
-6. Verify `/health` returns `{"ok":true,...}` after deploy.
-7. Log in to `/admin.html`, create a test experiment, and complete a participant run before inviting real users.
+6. Set `SURVEY_COMPLETION_REDIRECT_URL` if participants should leave the app after completion.
+7. Verify `/health` returns `{"ok":true,...}` after deploy.
+8. Log in to `/admin.html`, create a test experiment, and complete a participant run before inviting real users.
